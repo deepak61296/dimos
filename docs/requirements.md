@@ -47,7 +47,7 @@ pip install 'dimos[base,unitree,manipulation]'       # + Arm control
 | `sim` | MuJoCo simulation | mujoco, playground, pygame | No |
 | `unitree` | Unitree Go2 / G1 support | unitree-webrtc-connect | No |
 | `unitree-dds` | Unitree DDS bridge (superset of 'unitree') | unitree-sdk2py, cyclonedds | No |
-| `drone` | DJI Tello / MAVLink drones | pymavlink | No |
+| `drone` | DJI (via RosettaDrone) / MAVLink drones | pymavlink | No |
 | `manipulation` | Arm planning + control | Drake, piper-sdk, xarm-sdk | No |
 | `mapping` | GTSAM-backed pose graph optimization (relocalization) | gtsam-extended | No |
 | `cuda` | GPU acceleration | cupy, onnxruntime-gpu | **Yes** |
