@@ -23,6 +23,7 @@ from dimos.agents.annotation import skill
 from dimos.core.core import rpc
 from dimos.core.module import Module, ModuleConfig
 from dimos.core.stream import In, Out
+from dimos.models.segmentation.yoloe import YoloeBoxSegmenter
 from dimos.msgs.geometry_msgs.Transform import Transform
 from dimos.msgs.sensor_msgs.CameraInfo import CameraInfo
 from dimos.msgs.sensor_msgs.Image import Image, ImageFormat
@@ -53,6 +54,7 @@ class ObjectSceneRegistrationConfig(ModuleConfig):
     detector_backend: Literal["yoloe", "owlv2", "moondream"] = "yoloe"
     segmentation_backend: Literal["yolo", "edgetam"] = "yolo"
     detector_confidence: float = 0.6
+    segmentation_confidence: float = 0.05
     detect_on_request: bool = False
     distance_threshold: float = 0.2
     min_detections_for_permanent: int = 6
@@ -94,6 +96,7 @@ class ObjectSceneRegistrationModule(Module):
         self._detector_backend = self.config.detector_backend
         self._segmentation_backend = self.config.segmentation_backend
         self._detector_confidence = self.config.detector_confidence
+        self._segmentation_confidence = self.config.segmentation_confidence
         self._detect_on_request = self.config.detect_on_request
         self._object_db = ObjectDB(
             distance_threshold=self.config.distance_threshold,
@@ -130,15 +133,7 @@ class ObjectSceneRegistrationModule(Module):
                 conf=self._detector_confidence,
             )
 
-        if self._segmentation_backend == "edgetam":
-            try:
-                from dimos.models.segmentation.edge_tam import EdgeTAMImageSegmenter
-
-                self._segmenter = EdgeTAMImageSegmenter()
-            except ModuleNotFoundError as e:
-                raise ModuleNotFoundError(
-                    "EdgeTAM requires the optional dependencies from dimos[misc]"
-                ) from e
+        self._segmenter = self._create_segmenter()
 
         self.camera_info.subscribe(lambda msg: setattr(self, "_camera_info", msg))
 
@@ -150,15 +145,34 @@ class ObjectSceneRegistrationModule(Module):
         )
         backpressure(aligned_frames).subscribe(self._on_aligned_frames)
 
+    def _create_segmenter(self) -> Any | None:
+        if self._segmentation_backend == "yolo":
+            if self._detector_backend == "yoloe":
+                return None
+            return YoloeBoxSegmenter(confidence=self._segmentation_confidence)
+
+        if self._segmentation_backend == "edgetam":
+            try:
+                from dimos.models.segmentation.edge_tam import EdgeTAMImageSegmenter
+
+                return EdgeTAMImageSegmenter()
+            except ModuleNotFoundError as e:
+                raise ModuleNotFoundError(
+                    "EdgeTAM requires the optional dependencies from dimos[misc]"
+                ) from e
+        return None
+
     @rpc
     def stop(self) -> None:
         """Stop the module and clean up resources."""
 
         with self._processing_lock:
+            if self._segmenter and hasattr(self._segmenter, "stop"):
+                self._segmenter.stop()
+            self._segmenter = None
             if self._detector:
                 self._detector.stop()
                 self._detector = None
-            self._segmenter = None
 
             self._object_db.clear()
             self._latest_aligned_frames = None
