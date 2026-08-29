@@ -79,6 +79,9 @@ dimos run xarm-perception-sim \
   --kinematics.backend=pink
 ```
 
+For the complete six-object headless room demo, see
+[xArm Room Simulation](/docs/capabilities/manipulation/xarm-room-sim.md).
+
 Then use the IPython client:
 
 ```bash
