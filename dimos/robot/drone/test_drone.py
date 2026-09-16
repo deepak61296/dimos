@@ -24,6 +24,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+from pymavlink import mavutil  # type: ignore[import-untyped]
 import pytest
 
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
@@ -414,6 +415,71 @@ class TestReplayMode(unittest.TestCase):
 
 class TestDroneControlCommands(unittest.TestCase):
     """Test drone control commands with FakeMavlinkConnection."""
+
+    def test_arm_ignores_unrelated_command_ack(self) -> None:
+        """Arming should wait for its own acknowledgement before checking state."""
+        conn = MavlinkConnection("replay")
+        conn.connected = True
+        conn.mavlink = MagicMock()
+
+        unrelated_ack = MagicMock(
+            command=mavutil.mavlink.MAV_CMD_DO_SET_MODE,
+            result=mavutil.mavlink.MAV_RESULT_ACCEPTED,
+        )
+        arm_ack = MagicMock(
+            command=mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
+            result=mavutil.mavlink.MAV_RESULT_ACCEPTED,
+        )
+        armed_heartbeat = MagicMock(base_mode=mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
+        conn.mavlink.recv_match.side_effect = [
+            unrelated_ack,
+            arm_ack,
+            armed_heartbeat,
+        ]
+
+        with patch.object(conn, "update_telemetry"):
+            self.assertTrue(conn.arm())
+        self.assertEqual(conn.mavlink.recv_match.call_count, 3)
+
+    def test_set_mode_ignores_unrelated_command_ack(self) -> None:
+        """A mode change should use only its own command acknowledgement."""
+        conn = MavlinkConnection("replay")
+        conn.connected = True
+        conn.mavlink = MagicMock()
+
+        unrelated_ack = MagicMock(
+            command=mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
+            result=mavutil.mavlink.MAV_RESULT_ACCEPTED,
+        )
+        mode_ack = MagicMock(
+            command=mavutil.mavlink.MAV_CMD_DO_SET_MODE,
+            result=mavutil.mavlink.MAV_RESULT_ACCEPTED + 1,
+        )
+        conn.mavlink.recv_match.side_effect = [unrelated_ack, mode_ack]
+
+        with patch.object(conn, "update_telemetry"):
+            self.assertFalse(conn.set_mode("GUIDED"))
+        self.assertEqual(conn.mavlink.recv_match.call_count, 2)
+
+    def test_set_mode_reaches_matching_ack_after_unrelated_rejection(self) -> None:
+        """An unrelated rejected command should not fail a mode change."""
+        conn = MavlinkConnection("replay")
+        conn.connected = True
+        conn.mavlink = MagicMock()
+
+        unrelated_ack = MagicMock(
+            command=mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
+            result=mavutil.mavlink.MAV_RESULT_ACCEPTED + 1,
+        )
+        mode_ack = MagicMock(
+            command=mavutil.mavlink.MAV_CMD_DO_SET_MODE,
+            result=mavutil.mavlink.MAV_RESULT_ACCEPTED,
+        )
+        conn.mavlink.recv_match.side_effect = [unrelated_ack, mode_ack]
+
+        with patch.object(conn, "update_telemetry"):
+            self.assertTrue(conn.set_mode("GUIDED"))
+        self.assertEqual(conn.telemetry["mode"], 4)
 
     @patch("dimos.utils.testing.legacy_pickle.LegacyPickleStore")
     @patch("dimos.utils.data.get_data")
